@@ -5,9 +5,11 @@ use crossterm::{
     event::{read, KeyCode, KeyEvent, Event::*}, 
     terminal,
     terminal::ClearType,
+    queue,
     Result
 };
 
+use std::io::Write;
 use std::io::stdout;
 use std::time::Duration; 
 
@@ -23,6 +25,7 @@ impl Drop for CleanUp {
 struct Output
 {
     window_size: (usize, usize),
+    editor_contents: EditorContents, 
 }
 
 impl Output
@@ -32,7 +35,11 @@ impl Output
         let window_size = terminal::size()
             .map(|(x, y)| (x as usize, y as usize))
             .unwrap();
-        Self{ window_size }
+        Self
+        { 
+            window_size,
+            editor_contents: EditorContents::new(),
+        }
     }
 
     fn clear_screen() -> crossterm::Result<()>
@@ -41,19 +48,25 @@ impl Output
         execute!(stdout(), cursor::MoveTo(0, 0))
     }
 
-    fn draw_rows(&self)
+    fn draw_rows(&mut self)
     {
-        for _ in 0..self.window_size.1 
+        let screen_rows = self.window_size.1;
+        for i in 0..screen_rows 
         {
-            println!("~\r");
-        }
+            self.editor_contents.push('~');
+            if i < screen_rows - 1 
+            {
+                self.editor_contents.push_str("\r\n");
+            }
+       }
     }
 
-    fn refresh_screen(&self) -> crossterm::Result<()>
+    fn refresh_screen(&mut self) -> crossterm::Result<()>
     {
-        Self::clear_screen()?;
+        queue!(self.editor_contents, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
         self.draw_rows();
-        execute!(stdout(), cursor::MoveTo(0, 0))
+        queue!(self.editor_contents,cursor::MoveTo(0, 0))?;
+        self.editor_contents.flush()
     }
 }
 
@@ -106,10 +119,59 @@ impl Editor
         Ok(true)
     }
 
-    fn run(&self) -> crossterm::Result<bool>
+    fn run(&mut self) -> crossterm::Result<bool>
     {
         self.output.refresh_screen()?;
         self.process_keypress()
+    }
+}
+
+struct EditorContents
+{
+    content: String,
+}
+
+impl EditorContents
+{
+    fn new() -> Self
+    {
+        Self 
+        {
+            content: String::new(),
+        }
+    }
+
+    fn push(&mut self, ch:char)
+    {
+        self.content.push(ch)
+    }
+
+    fn push_str(&mut self, string: &str)
+    {
+        self.content.push_str(string)
+    }
+}
+
+impl std::io::Write for EditorContents 
+{
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize>
+    {
+        match std::str::from_utf8(buf)
+        {
+            Ok(s) => 
+            {
+                self.content.push_str(s);
+                Ok(s.len())
+            }
+            Err(_) => Err(std::io::ErrorKind::WriteZero.into()),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()>
+    {
+        let out = write!(stdout(), "{}", self.content);
+        std::io::stdout().flush()?;
+        self.content.clear();
+        out
     }
 }
 
@@ -117,7 +179,7 @@ fn main() -> Result<()>
 {
     let _clean_up = CleanUp;
     terminal::enable_raw_mode()?;
-    let editor = Editor::new();
+    let mut editor = Editor::new();
     while editor.run()?{}
     Ok(())
 }
