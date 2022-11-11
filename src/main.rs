@@ -24,10 +24,69 @@ impl Drop for CleanUp {
     }
 }
 
+struct CursorController
+{
+    cursor_x: usize,
+    cursor_y: usize,
+    screen_columns: usize,
+    screen_rows: usize,
+}
+
+impl CursorController
+{
+    fn new(window_size: (usize, usize)) -> CursorController
+    {
+        Self 
+        {
+            cursor_x: 0,
+            cursor_y: 0,
+            screen_columns: window_size.0,
+            screen_rows: window_size.1,
+        }
+    }
+
+    fn move_cursor(&mut self, direction: KeyCode)
+    {
+        match direction 
+        {
+            KeyCode::Up => 
+            {
+                if self.cursor_y > 0 
+                {
+                    self.cursor_y -= 1; 
+                }
+            }
+            KeyCode::Down => 
+            { 
+                if self.cursor_y < self.screen_columns
+                {
+                    self.cursor_y += 1; 
+                }
+            }
+            KeyCode::Left => 
+            { 
+                if self.cursor_x > 0
+                {
+                    self.cursor_x -= 1; 
+                }
+            }
+            KeyCode::Right => 
+            { 
+                if self.cursor_x < self.screen_columns
+                {
+                    self.cursor_y += 1; 
+                }
+            }
+            _ => unimplemented!(), 
+        }
+    }
+}
+
 struct Output
 {
     window_size: (usize, usize),
     editor_contents: EditorContents, 
+    cursor_controller: CursorController,
 }
 
 impl Output
@@ -41,9 +100,10 @@ impl Output
         { 
             window_size,
             editor_contents: EditorContents::new(),
+            cursor_controller: CursorController::new(window_size),
         }
     }
-
+    
     fn clear_screen() -> crossterm::Result<()>
     {
         execute!(stdout(), terminal::Clear(ClearType::All))?;
@@ -101,12 +161,19 @@ impl Output
             cursor::MoveTo(0, 0)
         )?;
         self.draw_rows();
+        let cursor_x = self.cursor_controller.cursor_x;
+        let cursor_y = self.cursor_controller.cursor_y;
         queue!(
             self.editor_contents,
-            cursor::MoveTo(0, 0),
+            cursor::MoveTo(cursor_x as u16, cursor_y as u16),
             cursor::Show
         )?;
         self.editor_contents.flush()
+    }
+
+    fn move_cursor(&mut self, direction: KeyCode)
+    {
+        self.cursor_controller.move_cursor(direction);
     }
 }
 
@@ -145,15 +212,25 @@ impl Editor
         }
     }
 
-    fn process_keypress(&self) -> crossterm::Result<bool>
+    fn process_keypress(&mut self) -> crossterm::Result<bool>
     {
         match self.reader.read_key()?
         {
+            // process quit
             KeyEvent
             {
                 code: KeyCode::Char('q'),
                 modifiers: event::KeyModifiers::CONTROL,
             } => return Ok(false),
+
+            // process cursor movement
+            KeyEvent
+            {
+                code: direction @ (KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right ),
+                modifiers: event::KeyModifiers::NONE,
+            } => self.output.move_cursor(direction),
+            
+            // else do nothing
             _ => {}
         }
         Ok(true)
