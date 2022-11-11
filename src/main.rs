@@ -13,6 +13,8 @@ use std::io::Write;
 use std::io::stdout;
 use std::time::Duration; 
 
+const VERSION: &str = "1.0";
+
 struct CleanUp;
 
 impl Drop for CleanUp {
@@ -51,9 +53,38 @@ impl Output
     fn draw_rows(&mut self)
     {
         let screen_rows = self.window_size.1;
+        let screen_columns = self.window_size.0;
         for i in 0..screen_rows 
         {
-            self.editor_contents.push('~');
+            if i == screen_rows / 3 
+            {
+                let mut welcome : String = format!("Pound Editor --- Version {}", VERSION);
+                if welcome.len() > screen_columns 
+                {
+                    welcome.truncate(screen_columns)
+                }
+
+                let mut padding = (screen_columns - welcome.len()) / 2;
+                if padding != 0 
+                {
+                    self.editor_contents.push('~');
+                    padding -= 1
+                }
+
+                (0..padding).for_each(|_| self.editor_contents.push(' '));
+                self.editor_contents.push_str(&welcome);
+            } 
+            else 
+            {
+                self.editor_contents.push('~');
+            }
+
+            queue!(
+                self.editor_contents,
+                terminal::Clear(ClearType::UntilNewLine)
+            )
+            .unwrap();
+
             if i < screen_rows - 1 
             {
                 self.editor_contents.push_str("\r\n");
@@ -63,9 +94,18 @@ impl Output
 
     fn refresh_screen(&mut self) -> crossterm::Result<()>
     {
-        queue!(self.editor_contents, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        queue!(
+            self.editor_contents,
+            cursor::Hide,
+            terminal::Clear(ClearType::All), 
+            cursor::MoveTo(0, 0)
+        )?;
         self.draw_rows();
-        queue!(self.editor_contents,cursor::MoveTo(0, 0))?;
+        queue!(
+            self.editor_contents,
+            cursor::MoveTo(0, 0),
+            cursor::Show
+        )?;
         self.editor_contents.flush()
     }
 }
