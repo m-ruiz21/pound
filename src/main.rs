@@ -31,6 +31,8 @@ struct CursorController
     cursor_y: usize,
     screen_columns: usize,
     screen_rows: usize,
+    row_offset: usize,
+    column_offset: usize,
 }
 
 impl CursorController
@@ -43,10 +45,27 @@ impl CursorController
             cursor_y: 0,
             screen_columns: window_size.0,
             screen_rows: window_size.1,
+            row_offset: 0,
+            column_offset: 0, 
         }
     }
 
-    fn move_cursor(&mut self, direction: KeyCode)
+    fn scroll(&mut self)
+    {
+        self.column_offset = cmp::min(self.column_offset, self.cursor_x);
+        if self.cursor_x >= self.column_offset + self.screen_columns
+        {
+            self.column_offset = self.cursor_x - self.screen_columns + 1;
+        }
+
+        self.row_offset = cmp::min(self.row_offset, self.cursor_y);
+        if self.cursor_y >= self.row_offset + self.screen_rows
+        {
+            self.row_offset = self.cursor_y - self.screen_rows + 1;
+        }
+    }
+
+    fn move_cursor(&mut self, direction: KeyCode, number_of_rows: usize)
     {
         match direction 
         {
@@ -59,7 +78,7 @@ impl CursorController
             }
             KeyCode::Down => 
             { 
-                if self.cursor_y < self.screen_columns
+                if self.cursor_y < number_of_rows
                 {
                     self.cursor_y += 1; 
                 }
@@ -73,11 +92,11 @@ impl CursorController
             }
             KeyCode::Right => 
             { 
-                if self.cursor_x < self.screen_columns
-                {
-                    self.cursor_x += 1; 
-                }
-            }
+                self.cursor_x += 1; 
+            },
+            KeyCode::End => self.cursor_y = number_of_rows - 1,
+            KeyCode::Home => self.cursor_y = 0,
+
             _ => unimplemented!(), 
         }
     }
@@ -160,7 +179,9 @@ impl Output
         let screen_columns = self.window_size.0;
         for i in 0..screen_rows 
         {
-            if i >= self.editor_rows.number_of_rows() {
+            let file_row = i + self.cursor_controller.row_offset;
+            if file_row >= self.editor_rows.number_of_rows() 
+            {
                 if self.editor_rows.number_of_rows() == 0 && i == screen_rows / 3 
                 {
                     let mut welcome : String = format!("Pound Editor --- Version {}", VERSION);
@@ -186,8 +207,11 @@ impl Output
             }
             else 
             {
-                let len = cmp::min(self.editor_rows.get_row(i).len(), screen_columns);
-                self.editor_contents.push_str(&self.editor_rows.get_row(i)[..len])
+                let row = self.editor_rows.get_row(file_row);
+                let column_offset = self.cursor_controller.column_offset;
+                let len = cmp::min(row.len().saturating_sub(column_offset), screen_columns);
+                let start = if len == 0 { 0 } else { column_offset };
+                self.editor_contents.push_str(&row[start..start + len])
             }
 
             queue!(
@@ -205,6 +229,8 @@ impl Output
 
     fn refresh_screen(&mut self) -> crossterm::Result<()>
     {
+        self.cursor_controller.scroll();
+        
         queue!(
             self.editor_contents,
             cursor::Hide,
@@ -212,19 +238,21 @@ impl Output
             cursor::MoveTo(0, 0)
         )?;
         self.draw_rows();
-        let cursor_x = self.cursor_controller.cursor_x;
-        let cursor_y = self.cursor_controller.cursor_y;
+
+        let cursor_x = self.cursor_controller.cursor_x - self.cursor_controller.column_offset;
+        let cursor_y = self.cursor_controller.cursor_y - self.cursor_controller.row_offset;
         queue!(
             self.editor_contents,
             cursor::MoveTo(cursor_x as u16, cursor_y as u16),
             cursor::Show
         )?;
+        
         self.editor_contents.flush()
     }
 
     fn move_cursor(&mut self, direction: KeyCode)
     {
-        self.cursor_controller.move_cursor(direction);
+        self.cursor_controller.move_cursor(direction, self.editor_rows.number_of_rows());
     }
 }
 
@@ -277,7 +305,7 @@ impl Editor
             // process cursor movement
             KeyEvent
             {
-                code: direction @ (KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right ),
+                code: direction @ (KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right | KeyCode::Home | KeyCode::End),
                 modifiers: event::KeyModifiers::NONE,
             } => self.output.move_cursor(direction),
             
