@@ -9,11 +9,12 @@ use crossterm::{
     Result
 };
 
-use std::io::Write;
-use std::io::stdout;
+use std::io::{Write, stdout};
+use std::{cmp, env, fs, io};
 use std::time::Duration; 
+use std::path::Path;
 
-const VERSION: &str = "1.0";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct CleanUp;
 
@@ -74,11 +75,52 @@ impl CursorController
             { 
                 if self.cursor_x < self.screen_columns
                 {
-                    self.cursor_y += 1; 
+                    self.cursor_x += 1; 
                 }
             }
             _ => unimplemented!(), 
         }
+    }
+}
+
+struct EditorRows
+{
+    row_contents: Vec<Box<str>>,
+}
+
+impl EditorRows
+{
+    fn new() -> Self 
+    {
+        let mut arg = env::args();
+
+        match arg.nth(1) 
+        {
+            None => Self {
+                row_contents: Vec::new(),
+            },
+            
+            Some(file) => Self::from_file(file.as_ref()),
+        }
+    }
+    
+    fn from_file(file: &Path) -> Self 
+    {
+        let file_contents = fs::read_to_string(file).expect("Unable to read file");
+        Self 
+        {
+            row_contents: file_contents.lines().map(|it| it.into()).collect(),
+        }
+    }
+
+    fn number_of_rows(&self) -> usize 
+    {
+        self.row_contents.len()
+    }
+
+    fn get_row(&self, at:usize) -> &str 
+    {
+        &self.row_contents[at] 
     }
 }
 
@@ -87,6 +129,7 @@ struct Output
     window_size: (usize, usize),
     editor_contents: EditorContents, 
     cursor_controller: CursorController,
+    editor_rows : EditorRows,
 }
 
 impl Output
@@ -101,6 +144,7 @@ impl Output
             window_size,
             editor_contents: EditorContents::new(),
             cursor_controller: CursorController::new(window_size),
+            editor_rows: EditorRows::new(),
         }
     }
     
@@ -116,27 +160,34 @@ impl Output
         let screen_columns = self.window_size.0;
         for i in 0..screen_rows 
         {
-            if i == screen_rows / 3 
-            {
-                let mut welcome : String = format!("Pound Editor --- Version {}", VERSION);
-                if welcome.len() > screen_columns 
+            if i >= self.editor_rows.number_of_rows() {
+                if self.editor_rows.number_of_rows() == 0 && i == screen_rows / 3 
                 {
-                    welcome.truncate(screen_columns)
-                }
+                    let mut welcome : String = format!("Pound Editor --- Version {}", VERSION);
+                    if welcome.len() > screen_columns 
+                    {
+                        welcome.truncate(screen_columns)
+                    }
 
-                let mut padding = (screen_columns - welcome.len()) / 2;
-                if padding != 0 
+                    let mut padding = (screen_columns - welcome.len()) / 2;
+                    if padding != 0 
+                    {
+                        self.editor_contents.push('~');
+                        padding -= 1
+                    }
+
+                    (0..padding).for_each(|_| self.editor_contents.push(' '));
+                    self.editor_contents.push_str(&welcome);
+                } 
+                else 
                 {
                     self.editor_contents.push('~');
-                    padding -= 1
                 }
-
-                (0..padding).for_each(|_| self.editor_contents.push(' '));
-                self.editor_contents.push_str(&welcome);
-            } 
+            }
             else 
             {
-                self.editor_contents.push('~');
+                let len = cmp::min(self.editor_rows.get_row(i).len(), screen_columns);
+                self.editor_contents.push_str(&self.editor_rows.get_row(i)[..len])
             }
 
             queue!(
