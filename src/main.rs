@@ -11,6 +11,7 @@ use crossterm::{
 
 use std::io::{Write, stdout};
 use std::{cmp, env, fs, io};
+use std::cmp::Ordering;
 use std::time::Duration; 
 use std::path::Path;
 
@@ -65,8 +66,9 @@ impl CursorController
         }
     }
 
-    fn move_cursor(&mut self, direction: KeyCode, number_of_rows: usize)
+    fn move_cursor(&mut self, direction: KeyCode, editor_rows: &EditorRows)
     {
+        let number_of_rows = editor_rows.number_of_rows();
         match direction 
         {
             KeyCode::Up => 
@@ -84,21 +86,46 @@ impl CursorController
                 }
             }
             KeyCode::Left => 
-            { 
-                if self.cursor_x > 0
+            {
+                if self.cursor_x != 0
                 {
-                    self.cursor_x -= 1; 
+                    self.cursor_x -= 1;
+                }
+                else if self.cursor_y > 0
+                {
+                    self.cursor_y -= 1;
+                    self.cursor_x = editor_rows.get_row(self.cursor_y).len();
                 }
             }
             KeyCode::Right => 
-            { 
-                self.cursor_x += 1; 
+            {
+                if self.cursor_y < number_of_rows
+                {
+                    match self.cursor_x.cmp(&editor_rows.get_row(self.cursor_y).len())
+                    {
+                        Ordering::Less => self.cursor_x += 1,
+                        Ordering::Equal => {
+                            self.cursor_y += 1;
+                            self.cursor_x = 0
+                        },
+                        _ => {}
+                    }
+                }
             },
             KeyCode::End => self.cursor_y = number_of_rows - 1,
             KeyCode::Home => self.cursor_y = 0,
 
             _ => unimplemented!(), 
         }
+        let row_len = if self.cursor_y < number_of_rows
+        {
+            editor_rows.get_row(self.cursor_y).len()
+        }
+        else 
+        {
+            0
+        };
+        self.cursor_x = cmp::min(self.cursor_x, row_len);
     }
 }
 
@@ -252,7 +279,7 @@ impl Output
 
     fn move_cursor(&mut self, direction: KeyCode)
     {
-        self.cursor_controller.move_cursor(direction, self.editor_rows.number_of_rows());
+        self.cursor_controller.move_cursor(direction, &self.editor_rows);
     }
 }
 
